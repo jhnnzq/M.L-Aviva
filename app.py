@@ -263,9 +263,7 @@ def main(page: ft.Page):
 
     usr = {"id": None, "nome": None, "nivel": None}
 
-    # ── FilePicker global — adicionado UMA VEZ ao overlay e nunca removido ──
-    # CORREÇÃO: não recolocar em cada ir()/fechar()/dlg_abrir().
-    # O FilePicker não tem representação visual, então não causa janela azul.
+    # ── FilePicker global — adicionado UMA VEZ e nunca removido do overlay ──
     foto_picker = ft.FilePicker()
     page.overlay.append(foto_picker)
 
@@ -309,9 +307,7 @@ def main(page: ft.Page):
 
     def is_min(): return usr["nivel"] == 1
 
-    # ── overlay: abre e fecha sem acumular ────────────
-    # CORREÇÃO: clear() simples — foto_picker já está no overlay desde o início
-    # e NÃO deve ser removido/readicionado. Apenas diálogos são gerenciados aqui.
+    # ── overlay: remove apenas AlertDialogs, preserva o foto_picker ──────────
 
     def _fechar_dialogs():
         """Fecha e remove apenas AlertDialogs do overlay, preservando o foto_picker."""
@@ -334,7 +330,6 @@ def main(page: ft.Page):
     # ── troca de tela ─────────────────────────────────
 
     def ir(controles, nav=True):
-        # CORREÇÃO: fecha apenas diálogos, não toca no foto_picker
         _fechar_dialogs()
         page.controls.clear()
         page.scroll = None
@@ -402,7 +397,6 @@ def main(page: ft.Page):
     # ══════════════════════════════════════════════════
 
     def tela_login():
-        # CORREÇÃO: fecha apenas diálogos, foto_picker permanece no overlay
         _fechar_dialogs()
         page.navigation_bar = None
         page.scroll = None
