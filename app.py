@@ -306,10 +306,11 @@ def main(page: ft.Page):
 
     # ── overlay: abre e fecha sem acumular ────────────
 
-    def fechar_overlay():                              # ← CORRIGIDO: mesma ordem de fechar()
+    def fechar_overlay():
         for ctrl in list(page.overlay):
             if hasattr(ctrl, "open"):
                 ctrl.open = False
+        page.update()
         page.overlay.clear()
         page.update()
 
@@ -322,20 +323,22 @@ def main(page: ft.Page):
         dlg.open = True
         page.update()
 
-    def fechar(dlg):                                   # ← CORRIGIDO: fecha, limpa, um update só
+    def fechar(dlg):
         dlg.open = False
+        page.update()
         page.overlay.clear()
         page.update()
 
     # ── troca de tela ─────────────────────────────────
 
     def ir(controles, nav=True):
-        page.overlay.clear()
+        page.overlay.clear()          # limpa overlays ao trocar tela
         page.controls.clear()
-        page.scroll = None
+        page.scroll = None            # reseta scroll da página (usado em login/cadastro)
         page.bgcolor = BG
         if nav:
             novas = db_contar_novas()
+            # Badge na aba Escala (índice 2)
             dests = [
                 ft.NavigationBarDestination(icon="home",          label="Início"),
                 ft.NavigationBarDestination(icon="people",        label="Equipe"),
@@ -362,6 +365,7 @@ def main(page: ft.Page):
                     ),
                 )],
             ))
+        # ── BUG FIX: scroll na coluna principal ──────
         page.controls.append(
             ft.Column(
                 controls=controles,
@@ -388,13 +392,10 @@ def main(page: ft.Page):
         ],
     )
     telas = []
-
-    def on_nav_change(e):                              # ← CORRIGIDO: função normal, sem tupla frágil
-        idx = e.control.selected_index
-        nav_bar.selected_index = idx
-        telas[idx]()
-
-    nav_bar.on_change = on_nav_change
+    nav_bar.on_change = lambda e: (
+        setattr(nav_bar, "selected_index", e.control.selected_index),
+        telas[e.control.selected_index]()
+    )
 
     # ══════════════════════════════════════════════════
     #  LOGIN
@@ -408,16 +409,9 @@ def main(page: ft.Page):
         f_senha = F("Senha", pw=True)
 
         def entrar(e):
-            nome  = (f_nome.value  or "").strip()
-            senha = (f_senha.value or "").strip()
-            if not nome:
-                snack("Informe o nome de usuário.", VM); return
-            if len(senha) < 8:
+            if len(f_senha.value) < 8:
                 snack("Senha muito curta!", VM); return
-            try:
-                r = db_login(nome, senha)
-            except Exception as ex:
-                snack(f"Erro de conexão: {ex}", VM); return
+            r = db_login(f_nome.value.strip(), f_senha.value.strip())
             if r:
                 usr["id"] = r[0]; usr["nome"] = r[1]; usr["nivel"] = r[2]
                 nav_bar.selected_index = 0
@@ -478,7 +472,7 @@ def main(page: ft.Page):
         page.update()
 
     # ══════════════════════════════════════════════════
-    #  CADASTRO
+    #  CADASTRO  — BUG FIX: scroll + overlay limpo
     # ══════════════════════════════════════════════════
 
     def tela_cadastro():
@@ -487,6 +481,8 @@ def main(page: ft.Page):
         f_nome  = F("Nome de usuário")
         f_senha = F("Senha (mín. 8 caracteres)", pw=True)
         f_conf  = F("Confirmar senha", pw=True)
+        # Cadastro público só permite Membro; Ministro só via painel de Equipe
+        # (campo de nível removido da tela pública — segurança)
 
         def cadastrar(e):
             nome = f_nome.value.strip()
@@ -496,7 +492,7 @@ def main(page: ft.Page):
                 snack("Informe um nome de usuário", VM); return
             if senha != conf:
                 snack("As senhas não coincidem!", VM); return
-            r = db_cadastrar(nome, senha, nivel=0)
+            r = db_cadastrar(nome, senha, nivel=0)   # sempre Membro no cadastro público
             if r == "ok":
                 snack("✅ Cadastro realizado! Faça o login.")
                 tela_login()
@@ -630,26 +626,14 @@ def main(page: ft.Page):
     def tela_equipe():
         lista = ft.Column(spacing=8)
 
-        # ── CORRIGIDO: FilePicker para foto de perfil — db_salvar_foto agora é usado
-        def on_foto_result(e: ft.FilePickerResultEvent, id_u):
-            if e.files:
-                caminho = e.files[0].path
-                db_salvar_foto(id_u, caminho)
-                snack("Foto atualizada! 📷")
-                refresh()
-
-        picker = ft.FilePicker()
-        page.overlay.append(picker)
-
-        def abrir_picker(id_u):
-            picker.on_result = lambda e: on_foto_result(e, id_u)
-            picker.pick_files(allowed_extensions=["jpg", "jpeg", "png"])
-
         def refresh():
             lista.controls.clear()
             for id_u, nm, nv, fns, foto in db_membros():
+                # Avatar: foto ou inicial
                 if foto and os.path.exists(foto):
-                    avatar = ft.CircleAvatar(foreground_image_src=foto, radius=22)
+                    avatar = ft.CircleAvatar(
+                        foreground_image_src=foto, radius=22,
+                    )
                 else:
                     avatar = ft.CircleAvatar(
                         content=ft.Text(nm[0].upper(), color="white"),
@@ -665,21 +649,14 @@ def main(page: ft.Page):
                                 T("Ministro 🎤" if nv == 1 else "Membro 🎵", s=11, c=AC),
                             ], expand=True, spacing=2),
                             ft.PopupMenuButton(
-                                icon="more_vert", icon_color=SB,
-                                visible=is_min() or id_u == usr["id"],
+                                icon="more_vert", icon_color=SB, visible=is_min(),
                                 items=[
-                                    ft.PopupMenuItem(
-                                        text="Alterar foto",
-                                        on_click=lambda e, u=id_u: abrir_picker(u),
-                                    ),
                                     ft.PopupMenuItem(text="Atribuir função",
-                                        on_click=lambda e, u=id_u: dlg_funcao(u, refresh),
-                                        visible=is_min()),
+                                        on_click=lambda e, u=id_u: dlg_funcao(u, refresh)),
                                     ft.PopupMenuItem(text="Remover membro",
-                                        on_click=lambda e, u=id_u: dlg_rem_mb(u, refresh),
-                                        visible=is_min()),
+                                        on_click=lambda e, u=id_u: dlg_rem_mb(u, refresh)),
                                 ],
-                            ) if is_min() or id_u == usr["id"] else ft.Container(),
+                            ) if is_min() else ft.Container(),
                         ]),
                     )
                 )
@@ -695,8 +672,6 @@ def main(page: ft.Page):
         )
 
         def add(e):
-            if not is_min():                                        # ← CORRIGIDO: dupla verificação
-                snack("Sem permissão para esta ação.", VM); return
             r = db_cadastrar(f_nm.value.strip(), f_pw.value.strip(), int(dd_nv.value))
             if r == "ok":
                 snack("Membro adicionado!")
@@ -810,6 +785,7 @@ def main(page: ft.Page):
 
         refresh()
 
+        # Campo de data manual (DD/MM/AAAA)
         f_data = ft.TextField(
             label="Data (DD/MM/AAAA)", hint_text="ex: 25/12/2025",
             color=TX, label_style=ft.TextStyle(color=SB),
@@ -831,7 +807,10 @@ def main(page: ft.Page):
             db_criar_escala(dt_val, f_hr.value.strip(), f_nm.value.strip())
             snack("Escala criada! 🎉")
             f_data.value = ""; f_hr.value = ""; f_nm.value = ""
-            refresh()
+            ir_escala_refresh(refresh)
+
+        def ir_escala_refresh(cb):
+            cb()
 
         ctrl = [ft.Container(padding=16, content=ft.Column(spacing=12, controls=[
             T("Escalas", s=22, b=True), DIV(), lista,
@@ -840,7 +819,9 @@ def main(page: ft.Page):
             ctrl[0].content.controls += [
                 DIV(),
                 T("Nova escala", s=14, b=True),
-                f_data, f_hr, f_nm,
+                f_data,
+                f_hr,
+                f_nm,
                 B("Criar escala", criar),
             ]
         ir(ctrl)
@@ -870,9 +851,6 @@ def main(page: ft.Page):
         def refresh():
             lista.controls.clear()
             for id_em, nm, func, status, justif, id_u in db_membros_escala(id_e):
-                # ── CORRIGIDO: se usr["id"] for None (sessão inválida), redireciona ao login
-                if usr["id"] is None:
-                    tela_login(); return
                 eh_eu = id_u == usr["id"]
                 lista.controls.append(ft.Container(
                     bgcolor=BG, border_radius=10, padding=10,
@@ -889,9 +867,7 @@ def main(page: ft.Page):
                             badge(status),
                             ft.GestureDetector(
                                 on_tap=lambda e, eid=id_em: [
-                                    db_rem_membro_escala(eid),
-                                    refresh(),
-                                    cb_ext() if cb_ext else None,      # ← CORRIGIDO
+                                    db_rem_membro_escala(eid), refresh(),
                                 ],
                                 visible=is_min(),
                                 content=ft.Container(
@@ -906,14 +882,10 @@ def main(page: ft.Page):
                         ),
                         ft.Row([
                             B("✓ Confirmar",
-                              lambda e, eid=id_em: [
-                                  db_responder(eid, "confirmado"),
-                                  refresh(),
-                                  cb_ext() if cb_ext else None,        # ← CORRIGIDO
-                              ],
+                              lambda e, eid=id_em: [db_responder(eid, "confirmado"), refresh()],
                               cor=VD, w=140),
                             B("✗ Recusar",
-                              lambda e, eid=id_em: dlg_recusar(eid, refresh, cb_ext),  # ← CORRIGIDO
+                              lambda e, eid=id_em: dlg_recusar(eid, refresh),
                               cor=VM, w=140),
                         ], visible=eh_eu and status == "pendente", spacing=8),
                     ], spacing=6),
@@ -960,7 +932,7 @@ def main(page: ft.Page):
         )
         dlg_abrir(dlg)
 
-    def dlg_recusar(id_em, cb, cb_ext=None):          # ← CORRIGIDO: aceita cb_ext
+    def dlg_recusar(id_em, cb):
         f_just = F("Motivo (obrigatório)")
 
         def ok(e):
@@ -969,9 +941,7 @@ def main(page: ft.Page):
             db_responder(id_em, "recusado", f_just.value.strip())
             dlg.open = False
             page.overlay.clear()
-            cb()
-            if cb_ext: cb_ext()                        # ← CORRIGIDO: propaga cb_ext
-            page.update()
+            cb(); page.update()
 
         dlg = ft.AlertDialog(
             title=ft.Text("Recusar escala", color=TX), bgcolor=CARD,
@@ -986,7 +956,7 @@ def main(page: ft.Page):
         dlg_abrir(dlg)
 
     # ══════════════════════════════════════════════════
-    #  REPERTÓRIO
+    #  REPERTÓRIO  — separação por escala + data
     # ══════════════════════════════════════════════════
 
     def tela_repertorio():
@@ -1113,7 +1083,7 @@ def main(page: ft.Page):
         dlg_abrir(dlg)
 
     # ══════════════════════════════════════════════════
-    #  AGENDA
+    #  AGENDA  — grade de calendário visual
     # ══════════════════════════════════════════════════
 
     def tela_agenda():
@@ -1123,29 +1093,20 @@ def main(page: ft.Page):
                  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
         DIAS_SEMANA = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
 
+        # Indexa escalas por data
         esc_por_data: dict[date, list] = {}
         for id_e, dt, hr, nm, nova in escs:
-            # ── CORRIGIDO: normaliza dt para date — alguns conectores MySQL
-            # retornam string em vez de objeto date dependendo da configuração
-            if isinstance(dt, str):
-                dt = datetime.strptime(dt, "%Y-%m-%d").date()
             esc_por_data.setdefault(dt, []).append((id_e, hr, nm, nova))
 
-        # ── CORRIGIDO: pré-carrega todos os status de uma vez ──────────
-        # Antes: db_status_escala() era chamado dentro do loop de dias e
-        # novamente na lista abaixo — uma query por escala, duas vezes.
-        # Agora: todas as queries rodam aqui e o resultado fica em cache.
-        status_cache: dict[int, tuple] = {
-            id_e: db_status_escala(id_e)
-            for id_e, dt, hr, nm, nova in escs
-        }
-
+        # Meses que têm escala
         meses_com_escala: set[tuple] = {(d.year, d.month) for d in esc_por_data}
+        # Adiciona mês atual sempre
         meses_com_escala.add((hoje.year, hoje.month))
 
         ag = ft.Column(spacing=24)
 
         for (ano, mes) in sorted(meses_com_escala):
+            # Cabeçalho do mês
             semana_cells = [
                 ft.Container(
                     content=ft.Text(d, size=11, color=SB,
@@ -1157,8 +1118,11 @@ def main(page: ft.Page):
                 for d in DIAS_SEMANA
             ]
 
+            # Gera grade de dias
             primeiro_dia, total_dias = calendar.monthrange(ano, mes)
+            # primeiro_dia: 0=Seg … 6=Dom
             cells = []
+            # Células vazias iniciais
             for _ in range(primeiro_dia):
                 cells.append(ft.Container(width=48, height=48))
 
@@ -1168,20 +1132,23 @@ def main(page: ft.Page):
                 tem_escala = bool(escalas_do_dia)
                 eh_hoje    = d == hoje
 
+                # Cor de fundo da célula
                 if eh_hoje and tem_escala:
                     bg = AC
                 elif eh_hoje:
                     bg = "#2a2a4a"
                 elif tem_escala:
+                    # Verde se todos confirmaram, azul se há pendentes
                     if escalas_do_dia:
                         id_e0 = escalas_do_dia[0][0]
-                        conf, total_m = status_cache.get(id_e0, (0, 0))   # ← CORRIGIDO: usa cache
+                        conf, total_m = db_status_escala(id_e0)
                         bg = "#1b4332" if (conf == total_m and total_m > 0) else C2
                     else:
                         bg = C2
                 else:
                     bg = "transparent"
 
+                # Badge "nova"
                 tem_nova = any(e[3] for e in escalas_do_dia)
 
                 cell_content = ft.Stack([
@@ -1230,6 +1197,7 @@ def main(page: ft.Page):
                     content=cell_content,
                 ) if tem_escala else cell_content)
 
+            # Monta linhas de 7
             rows = []
             row_w = [ft.Row(semana_cells, spacing=4)]
             row_cur = []
@@ -1239,6 +1207,7 @@ def main(page: ft.Page):
                     rows.append(ft.Row(row_cur, spacing=4))
                     row_cur = []
             if row_cur:
+                # preenche até 7
                 while len(row_cur) < 7:
                     row_cur.append(ft.Container(width=48, height=48))
                 rows.append(ft.Row(row_cur, spacing=4))
@@ -1252,6 +1221,7 @@ def main(page: ft.Page):
                 *rows,
             ], spacing=4))
 
+            # Lista de escalas do mês abaixo do calendário
             items_mes = sorted(
                 [(d, escs_d) for d, escs_d in esc_por_data.items()
                  if d.year == ano and d.month == mes],
@@ -1259,7 +1229,7 @@ def main(page: ft.Page):
             )
             for d_item, escs_list in items_mes:
                 for id_e, hr, nm, nova in escs_list:
-                    conf, total_m = status_cache.get(id_e, (0, 0))        # ← CORRIGIDO: usa cache
+                    conf, total_m = db_status_escala(id_e)
                     ag.controls[-1].controls.append(
                         ft.GestureDetector(
                             on_tap=lambda e, eid=id_e: dlg_escala(eid),
@@ -1308,12 +1278,13 @@ def main(page: ft.Page):
         ]))])
 
     def dlg_escolher_escala(escalas, d):
+        """Quando há mais de uma escala no mesmo dia, oferece escolha."""
         items = []
         for id_e, hr, nm, nova in escalas:
             items.append(ft.ListTile(
                 title=ft.Text(nm or "Escala", color=TX),
                 subtitle=ft.Text(hr or "", color=SB),
-                on_click=lambda e, eid=id_e: dlg_escala(eid),  # ← CORRIGIDO: dlg_abrir já limpa overlay
+                on_click=lambda e, eid=id_e: [fechar_overlay(), dlg_escala(eid)],
             ))
         dlg = ft.AlertDialog(
             title=ft.Text(f"Escalas em {d.strftime('%d/%m/%Y')}", color=TX),
