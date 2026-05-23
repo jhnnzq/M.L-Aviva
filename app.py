@@ -69,7 +69,6 @@ def init_db():
         PRIMARY KEY(id_escala,id_musica),
         FOREIGN KEY(id_escala) REFERENCES escalas(id_escala),
         FOREIGN KEY(id_musica) REFERENCES musicas(id_musica))""")
-    # Migração segura: adiciona coluna foto se não existir
     try:
         c.execute("ALTER TABLE usuarios ADD COLUMN foto_user VARCHAR(255) DEFAULT NULL")
         conn.commit()
@@ -264,6 +263,12 @@ def main(page: ft.Page):
 
     usr = {"id": None, "nome": None, "nivel": None}
 
+    # ── FilePicker global — adicionado UMA VEZ ao overlay e nunca removido ──
+    # CORREÇÃO: não recolocar em cada ir()/fechar()/dlg_abrir().
+    # O FilePicker não tem representação visual, então não causa janela azul.
+    foto_picker = ft.FilePicker()
+    page.overlay.append(foto_picker)
+
     # ── helpers ───────────────────────────────────────
 
     def snack(msg, cor=VD):
@@ -305,39 +310,37 @@ def main(page: ft.Page):
     def is_min(): return usr["nivel"] == 1
 
     # ── overlay: abre e fecha sem acumular ────────────
+    # CORREÇÃO: clear() simples — foto_picker já está no overlay desde o início
+    # e NÃO deve ser removido/readicionado. Apenas diálogos são gerenciados aqui.
 
-    def fechar_overlay():                              # ← CORRIGIDO: mesma ordem de fechar()
+    def _fechar_dialogs():
+        """Fecha e remove apenas AlertDialogs do overlay, preservando o foto_picker."""
         for ctrl in list(page.overlay):
-            if hasattr(ctrl, "open"):
+            if isinstance(ctrl, ft.AlertDialog):
                 ctrl.open = False
-        page.overlay.clear()
-        page.update()
+        page.overlay[:] = [c for c in page.overlay if not isinstance(c, ft.AlertDialog)]
 
     def dlg_abrir(dlg):
-        for ctrl in list(page.overlay):
-            if hasattr(ctrl, "open"):
-                ctrl.open = False
-        page.overlay.clear()
+        _fechar_dialogs()
         page.overlay.append(dlg)
         dlg.open = True
         page.update()
 
-    def fechar(dlg):                                   # ← CORRIGIDO: fecha, limpa, um update só
+    def fechar(dlg):
         dlg.open = False
-        page.overlay.clear()
+        _fechar_dialogs()
         page.update()
 
     # ── troca de tela ─────────────────────────────────
 
     def ir(controles, nav=True):
-        page.overlay.clear()
+        # CORREÇÃO: fecha apenas diálogos, não toca no foto_picker
+        _fechar_dialogs()
         page.controls.clear()
         page.scroll = None
         page.bgcolor = BG
         if nav:
             novas = db_contar_novas()
-            # ── CORRIGIDO: ft.Badge(content=...) só existe em Flet mais recente.
-            # Solução compatível: ícone normal na aba, com label numérico no texto.
             dests = [
                 ft.NavigationBarDestination(icon="home",          label="Início"),
                 ft.NavigationBarDestination(icon="people",        label="Equipe"),
@@ -387,7 +390,7 @@ def main(page: ft.Page):
     )
     telas = []
 
-    def on_nav_change(e):                              # ← CORRIGIDO: função normal, sem tupla frágil
+    def on_nav_change(e):
         idx = e.control.selected_index
         nav_bar.selected_index = idx
         telas[idx]()
@@ -399,7 +402,8 @@ def main(page: ft.Page):
     # ══════════════════════════════════════════════════
 
     def tela_login():
-        page.overlay.clear()
+        # CORREÇÃO: fecha apenas diálogos, foto_picker permanece no overlay
+        _fechar_dialogs()
         page.navigation_bar = None
         page.scroll = None
         f_nome  = F("Nome")
@@ -480,7 +484,7 @@ def main(page: ft.Page):
     # ══════════════════════════════════════════════════
 
     def tela_cadastro():
-        page.overlay.clear()
+        _fechar_dialogs()
         page.navigation_bar = None
         f_nome  = F("Nome de usuário")
         f_senha = F("Senha (mín. 8 caracteres)", pw=True)
@@ -628,7 +632,6 @@ def main(page: ft.Page):
     def tela_equipe():
         lista = ft.Column(spacing=8)
 
-        # ── CORRIGIDO: FilePicker para foto de perfil — db_salvar_foto agora é usado
         def on_foto_result(e: ft.FilePickerResultEvent, id_u):
             if e.files:
                 caminho = e.files[0].path
@@ -636,12 +639,9 @@ def main(page: ft.Page):
                 snack("Foto atualizada! 📷")
                 refresh()
 
-        picker = ft.FilePicker()
-        page.overlay.append(picker)
-
         def abrir_picker(id_u):
-            picker.on_result = lambda e: on_foto_result(e, id_u)
-            picker.pick_files(allowed_extensions=["jpg", "jpeg", "png"])
+            foto_picker.on_result = lambda e: on_foto_result(e, id_u)
+            foto_picker.pick_files(allowed_extensions=["jpg", "jpeg", "png"])
 
         def refresh():
             lista.controls.clear()
@@ -693,7 +693,7 @@ def main(page: ft.Page):
         )
 
         def add(e):
-            if not is_min():                                        # ← CORRIGIDO: dupla verificação
+            if not is_min():
                 snack("Sem permissão para esta ação.", VM); return
             r = db_cadastrar(f_nm.value.strip(), f_pw.value.strip(), int(dd_nv.value))
             if r == "ok":
@@ -731,9 +731,8 @@ def main(page: ft.Page):
                 for f in db_funcoes():
                     if f[1] == f_nova.value.strip():
                         db_atribuir_funcao(id_u, f[0]); break
-            dlg.open = False
-            page.overlay.clear()
-            cb(); page.update()
+            fechar(dlg)
+            cb()
 
         dlg = ft.AlertDialog(
             title=ft.Text("Atribuir Função", color=TX), bgcolor=CARD,
@@ -745,9 +744,8 @@ def main(page: ft.Page):
     def dlg_rem_mb(id_u, cb):
         def ok(e):
             db_remover_membro(id_u)
-            dlg.open = False
-            page.overlay.clear()
-            cb(); page.update()
+            fechar(dlg)
+            cb()
         dlg = ft.AlertDialog(
             title=ft.Text("Remover membro?", color=TX), bgcolor=CARD,
             content=ft.Text("Esta ação não pode ser desfeita.", color=SB),
@@ -846,9 +844,8 @@ def main(page: ft.Page):
     def dlg_del_escala(id_e, cb):
         def ok(e):
             db_deletar_escala(id_e)
-            dlg.open = False
-            page.overlay.clear()
-            cb(); page.update()
+            fechar(dlg)
+            cb()
         dlg = ft.AlertDialog(
             title=ft.Text("Excluir escala?", color=TX), bgcolor=CARD,
             content=ft.Text("Esta ação não pode ser desfeita.", color=SB),
@@ -868,7 +865,6 @@ def main(page: ft.Page):
         def refresh():
             lista.controls.clear()
             for id_em, nm, func, status, justif, id_u in db_membros_escala(id_e):
-                # ── CORRIGIDO: se usr["id"] for None (sessão inválida), redireciona ao login
                 if usr["id"] is None:
                     tela_login(); return
                 eh_eu = id_u == usr["id"]
@@ -889,7 +885,7 @@ def main(page: ft.Page):
                                 on_tap=lambda e, eid=id_em: [
                                     db_rem_membro_escala(eid),
                                     refresh(),
-                                    cb_ext() if cb_ext else None,      # ← CORRIGIDO
+                                    cb_ext() if cb_ext else None,
                                 ],
                                 visible=is_min(),
                                 content=ft.Container(
@@ -907,11 +903,11 @@ def main(page: ft.Page):
                               lambda e, eid=id_em: [
                                   db_responder(eid, "confirmado"),
                                   refresh(),
-                                  cb_ext() if cb_ext else None,        # ← CORRIGIDO
+                                  cb_ext() if cb_ext else None,
                               ],
                               cor=VD, w=140),
                             B("✗ Recusar",
-                              lambda e, eid=id_em: dlg_recusar(eid, refresh, cb_ext),  # ← CORRIGIDO
+                              lambda e, eid=id_em: dlg_recusar(eid, refresh, cb_ext),
                               cor=VM, w=140),
                         ], visible=eh_eu and status == "pendente", spacing=8),
                     ], spacing=6),
@@ -958,18 +954,16 @@ def main(page: ft.Page):
         )
         dlg_abrir(dlg)
 
-    def dlg_recusar(id_em, cb, cb_ext=None):          # ← CORRIGIDO: aceita cb_ext
+    def dlg_recusar(id_em, cb, cb_ext=None):
         f_just = F("Motivo (obrigatório)")
 
         def ok(e):
             if not f_just.value.strip():
                 snack("Informe o motivo", VM); return
             db_responder(id_em, "recusado", f_just.value.strip())
-            dlg.open = False
-            page.overlay.clear()
+            fechar(dlg)
             cb()
-            if cb_ext: cb_ext()                        # ← CORRIGIDO: propaga cb_ext
-            page.update()
+            if cb_ext: cb_ext()
 
         dlg = ft.AlertDialog(
             title=ft.Text("Recusar escala", color=TX), bgcolor=CARD,
@@ -1095,9 +1089,8 @@ def main(page: ft.Page):
     def dlg_del_musica(id_m, cb):
         def ok(e):
             db_deletar_musica(id_m)
-            dlg.open = False
-            page.overlay.clear()
-            cb(); page.update()
+            fechar(dlg)
+            cb()
         dlg = ft.AlertDialog(
             title=ft.Text("Excluir música?", color=TX), bgcolor=CARD,
             content=ft.Text("Remove de todas as escalas.", color=SB),
@@ -1123,16 +1116,10 @@ def main(page: ft.Page):
 
         esc_por_data: dict[date, list] = {}
         for id_e, dt, hr, nm, nova in escs:
-            # ── CORRIGIDO: normaliza dt para date — alguns conectores MySQL
-            # retornam string em vez de objeto date dependendo da configuração
             if isinstance(dt, str):
                 dt = datetime.strptime(dt, "%Y-%m-%d").date()
             esc_por_data.setdefault(dt, []).append((id_e, hr, nm, nova))
 
-        # ── CORRIGIDO: pré-carrega todos os status de uma vez ──────────
-        # Antes: db_status_escala() era chamado dentro do loop de dias e
-        # novamente na lista abaixo — uma query por escala, duas vezes.
-        # Agora: todas as queries rodam aqui e o resultado fica em cache.
         status_cache: dict[int, tuple] = {
             id_e: db_status_escala(id_e)
             for id_e, dt, hr, nm, nova in escs
@@ -1173,7 +1160,7 @@ def main(page: ft.Page):
                 elif tem_escala:
                     if escalas_do_dia:
                         id_e0 = escalas_do_dia[0][0]
-                        conf, total_m = status_cache.get(id_e0, (0, 0))   # ← CORRIGIDO: usa cache
+                        conf, total_m = status_cache.get(id_e0, (0, 0))
                         bg = "#1b4332" if (conf == total_m and total_m > 0) else C2
                     else:
                         bg = C2
@@ -1257,7 +1244,7 @@ def main(page: ft.Page):
             )
             for d_item, escs_list in items_mes:
                 for id_e, hr, nm, nova in escs_list:
-                    conf, total_m = status_cache.get(id_e, (0, 0))        # ← CORRIGIDO: usa cache
+                    conf, total_m = status_cache.get(id_e, (0, 0))
                     ag.controls[-1].controls.append(
                         ft.GestureDetector(
                             on_tap=lambda e, eid=id_e: dlg_escala(eid),
@@ -1311,7 +1298,7 @@ def main(page: ft.Page):
             items.append(ft.ListTile(
                 title=ft.Text(nm or "Escala", color=TX),
                 subtitle=ft.Text(hr or "", color=SB),
-                on_click=lambda e, eid=id_e: dlg_escala(eid),  # ← CORRIGIDO: dlg_abrir já limpa overlay
+                on_click=lambda e, eid=id_e: dlg_escala(eid),
             ))
         dlg = ft.AlertDialog(
             title=ft.Text(f"Escalas em {d.strftime('%d/%m/%Y')}", color=TX),
