@@ -623,6 +623,21 @@ def main(page: ft.Page):
     def tela_equipe():
         lista = ft.Column(spacing=8)
 
+        # ── CORRIGIDO: FilePicker para foto de perfil — db_salvar_foto agora é usado
+        def on_foto_result(e: ft.FilePickerResultEvent, id_u):
+            if e.files:
+                caminho = e.files[0].path
+                db_salvar_foto(id_u, caminho)
+                snack("Foto atualizada! 📷")
+                refresh()
+
+        picker = ft.FilePicker()
+        page.overlay.append(picker)
+
+        def abrir_picker(id_u):
+            picker.on_result = lambda e: on_foto_result(e, id_u)
+            picker.pick_files(allowed_extensions=["jpg", "jpeg", "png"])
+
         def refresh():
             lista.controls.clear()
             for id_u, nm, nv, fns, foto in db_membros():
@@ -643,14 +658,21 @@ def main(page: ft.Page):
                                 T("Ministro 🎤" if nv == 1 else "Membro 🎵", s=11, c=AC),
                             ], expand=True, spacing=2),
                             ft.PopupMenuButton(
-                                icon="more_vert", icon_color=SB, visible=is_min(),
+                                icon="more_vert", icon_color=SB,
+                                visible=is_min() or id_u == usr["id"],
                                 items=[
+                                    ft.PopupMenuItem(
+                                        text="Alterar foto",
+                                        on_click=lambda e, u=id_u: abrir_picker(u),
+                                    ),
                                     ft.PopupMenuItem(text="Atribuir função",
-                                        on_click=lambda e, u=id_u: dlg_funcao(u, refresh)),
+                                        on_click=lambda e, u=id_u: dlg_funcao(u, refresh),
+                                        visible=is_min()),
                                     ft.PopupMenuItem(text="Remover membro",
-                                        on_click=lambda e, u=id_u: dlg_rem_mb(u, refresh)),
+                                        on_click=lambda e, u=id_u: dlg_rem_mb(u, refresh),
+                                        visible=is_min()),
                                 ],
-                            ) if is_min() else ft.Container(),
+                            ) if is_min() or id_u == usr["id"] else ft.Container(),
                         ]),
                     )
                 )
@@ -1096,6 +1118,10 @@ def main(page: ft.Page):
 
         esc_por_data: dict[date, list] = {}
         for id_e, dt, hr, nm, nova in escs:
+            # ── CORRIGIDO: normaliza dt para date — alguns conectores MySQL
+            # retornam string em vez de objeto date dependendo da configuração
+            if isinstance(dt, str):
+                dt = datetime.strptime(dt, "%Y-%m-%d").date()
             esc_por_data.setdefault(dt, []).append((id_e, hr, nm, nova))
 
         # ── CORRIGIDO: pré-carrega todos os status de uma vez ──────────
@@ -1280,7 +1306,7 @@ def main(page: ft.Page):
             items.append(ft.ListTile(
                 title=ft.Text(nm or "Escala", color=TX),
                 subtitle=ft.Text(hr or "", color=SB),
-                on_click=lambda e, eid=id_e: [fechar_overlay(), dlg_escala(eid)],
+                on_click=lambda e, eid=id_e: dlg_escala(eid),  # ← CORRIGIDO: dlg_abrir já limpa overlay
             ))
         dlg = ft.AlertDialog(
             title=ft.Text(f"Escalas em {d.strftime('%d/%m/%Y')}", color=TX),
