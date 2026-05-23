@@ -408,9 +408,16 @@ def main(page: ft.Page):
         f_senha = F("Senha", pw=True)
 
         def entrar(e):
-            if len(f_senha.value) < 8:
+            nome  = (f_nome.value  or "").strip()
+            senha = (f_senha.value or "").strip()
+            if not nome:
+                snack("Informe o nome de usuário.", VM); return
+            if len(senha) < 8:
                 snack("Senha muito curta!", VM); return
-            r = db_login(f_nome.value.strip(), f_senha.value.strip())
+            try:
+                r = db_login(nome, senha)
+            except Exception as ex:
+                snack(f"Erro de conexão: {ex}", VM); return
             if r:
                 usr["id"] = r[0]; usr["nome"] = r[1]; usr["nivel"] = r[2]
                 nav_bar.selected_index = 0
