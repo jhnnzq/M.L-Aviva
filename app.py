@@ -306,11 +306,10 @@ def main(page: ft.Page):
 
     # ── overlay: abre e fecha sem acumular ────────────
 
-    def fechar_overlay():
+    def fechar_overlay():                              # ← CORRIGIDO: mesma ordem de fechar()
         for ctrl in list(page.overlay):
             if hasattr(ctrl, "open"):
                 ctrl.open = False
-        page.update()
         page.overlay.clear()
         page.update()
 
@@ -323,9 +322,8 @@ def main(page: ft.Page):
         dlg.open = True
         page.update()
 
-    def fechar(dlg):
+    def fechar(dlg):                                   # ← CORRIGIDO: fecha, limpa, um update só
         dlg.open = False
-        page.update()
         page.overlay.clear()
         page.update()
 
@@ -668,6 +666,8 @@ def main(page: ft.Page):
         )
 
         def add(e):
+            if not is_min():                                        # ← CORRIGIDO: dupla verificação
+                snack("Sem permissão para esta ação.", VM); return
             r = db_cadastrar(f_nm.value.strip(), f_pw.value.strip(), int(dd_nv.value))
             if r == "ok":
                 snack("Membro adicionado!")
@@ -841,6 +841,9 @@ def main(page: ft.Page):
         def refresh():
             lista.controls.clear()
             for id_em, nm, func, status, justif, id_u in db_membros_escala(id_e):
+                # ── CORRIGIDO: se usr["id"] for None (sessão inválida), redireciona ao login
+                if usr["id"] is None:
+                    tela_login(); return
                 eh_eu = id_u == usr["id"]
                 lista.controls.append(ft.Container(
                     bgcolor=BG, border_radius=10, padding=10,
