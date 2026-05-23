@@ -390,10 +390,13 @@ def main(page: ft.Page):
         ],
     )
     telas = []
-    nav_bar.on_change = lambda e: (
-        setattr(nav_bar, "selected_index", e.control.selected_index),
-        telas[e.control.selected_index]()
-    )
+
+    def on_nav_change(e):                              # ← CORRIGIDO: função normal, sem tupla frágil
+        idx = e.control.selected_index
+        nav_bar.selected_index = idx
+        telas[idx]()
+
+    nav_bar.on_change = on_nav_change
 
     # ══════════════════════════════════════════════════
     #  LOGIN
@@ -1092,6 +1095,15 @@ def main(page: ft.Page):
         for id_e, dt, hr, nm, nova in escs:
             esc_por_data.setdefault(dt, []).append((id_e, hr, nm, nova))
 
+        # ── CORRIGIDO: pré-carrega todos os status de uma vez ──────────
+        # Antes: db_status_escala() era chamado dentro do loop de dias e
+        # novamente na lista abaixo — uma query por escala, duas vezes.
+        # Agora: todas as queries rodam aqui e o resultado fica em cache.
+        status_cache: dict[int, tuple] = {
+            id_e: db_status_escala(id_e)
+            for id_e, dt, hr, nm, nova in escs
+        }
+
         meses_com_escala: set[tuple] = {(d.year, d.month) for d in esc_por_data}
         meses_com_escala.add((hoje.year, hoje.month))
 
@@ -1127,7 +1139,7 @@ def main(page: ft.Page):
                 elif tem_escala:
                     if escalas_do_dia:
                         id_e0 = escalas_do_dia[0][0]
-                        conf, total_m = db_status_escala(id_e0)
+                        conf, total_m = status_cache.get(id_e0, (0, 0))   # ← CORRIGIDO: usa cache
                         bg = "#1b4332" if (conf == total_m and total_m > 0) else C2
                     else:
                         bg = C2
@@ -1211,7 +1223,7 @@ def main(page: ft.Page):
             )
             for d_item, escs_list in items_mes:
                 for id_e, hr, nm, nova in escs_list:
-                    conf, total_m = db_status_escala(id_e)
+                    conf, total_m = status_cache.get(id_e, (0, 0))        # ← CORRIGIDO: usa cache
                     ag.controls[-1].controls.append(
                         ft.GestureDetector(
                             on_tap=lambda e, eid=id_e: dlg_escala(eid),
