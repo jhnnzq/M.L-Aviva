@@ -845,7 +845,7 @@ def main(page: ft.Page):
             content=ft.Text("Esta ação não pode ser desfeita.", color=SB),
             actions=[
                 ft.TextButton("Cancelar", on_click=lambda e: fechar(dlg), style=ft.ButtonStyle(color=SB)),
-                ft.TextButton("Excluir",  on_click=ok, style=ft.ButtonStyle(color=VM)),
+                ft.TextButton("Excluir",  on_click=ok e: fechar(dlg), style=ft.ButtonStyle(color=VM)),
             ],
         )
         dlg_abrir(dlg)
