@@ -848,6 +848,7 @@ def main(page: ft.Page):
                 ft.TextButton("Excluir",  on_click=ok, style=ft.ButtonStyle(color=VM)),
             ],
         )
+        dlg_abrir(dlg)
 
     def dlg_escala(id_e, cb_ext=None):
         db_marcar_vista(id_e)
